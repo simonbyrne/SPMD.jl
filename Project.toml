@@ -1,0 +1,8 @@
+name = "SPMD"
+uuid = "4c9fca5a-ff44-4abb-bb5b-10673f7ea90d"
+authors = ["Simon Byrne <simonbyrne@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
