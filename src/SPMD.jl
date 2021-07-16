@@ -1,6 +1,6 @@
 module SPMD
 
-export @spmd
+export @spmd, spmd
 
 using Distributed
 
@@ -8,7 +8,7 @@ using Distributed
 """
     SPMDResult
 
-Contains a vector of futures. 
+Contains a vector of futures.
 
 Calling `getindex` on this will `fetch` the corresponding result.
 
@@ -19,8 +19,58 @@ Calling `getindex` on this will `fetch` the corresponding result.
 struct SPMDResult
     futures::Vector{Future}
 end
+SPMDResult() = Future[]
+
 Base.length(res::SPMDResult) = length(res.futures)
 Base.getindex(res::SPMDResult, i) = fetch(res.futures[i])
+
+
+remoterefs(_) = nothing
+remoterefs(spmd::SPMDResult) = spmd.futures
+
+
+function getrref(arg, i)
+    rrefs = remoterefs(arg)
+    isnothing(rrefs) ? arg : rrefs[i]
+end
+
+
+struct Workers
+    pids::Vector{Int}
+end
+Workers() = Workers(workers())
+
+workers_from_objs(args...) = workers_from_rrefs(map(remoterefs, args)...)
+
+workers_from_rrefs() = Workers()
+workers_from_rrefs(::Nothing, args...) = workers_from_rrefs(args...)
+function workers_from_rrefs(rrefs, args...)
+    W = Workers(map(rref -> rref.where, rrefs))
+    workers_from_rrefs(W, args...)
+end
+workers_from_rrefs(W::Workers) = W
+workers_from_rrefs(W::Workers, ::Nothing, args...) =
+    workers_from_rrefs(W, args...)
+function workers_from_rrefs(W::Workers, rrefs, args...)
+    all(zip(W.pids, rrefs)) do (pid, rref)
+        pid == rref.where
+    end || error("Incompatible distributed objects")
+    workers_from_rrefs(W, args...)
+end
+
+
+spmd(fn, args...) = spmd(fn, workers_from_objs(args...), args...)
+
+function spmd(fn, workers::Workers, args...)   
+    rresult = map(enumerate(workers.pids)) do (i, pid)
+        rargs = map(arg -> getrref(arg, i), args)
+        remotecall(pid, rargs) do rargs
+            fn(map(fetch, rargs)...)
+        end
+    end    
+    return SPMDResult(rresult)
+end
+
 
 
 """
@@ -31,7 +81,7 @@ returns a [`SPMDResult`](@ref) object. Call `wait` or `fetch` on the `SPMDResult
 synchronize.
 """
 function spmd_eval(m::Module, procs, ex)
-    SPMDResult([remotecall(Core.eval, pid, m, ex) for pid in procs])
+    spmd(Core.eval, Workers(procs), m, ex)
 end
 function Base.wait(res::SPMDResult)
     local c_ex
@@ -66,7 +116,7 @@ function Base.fetch(res::SPMDResult)
         throw(c_ex)
     end
     return results
-end    
+end
 
 
 
@@ -86,7 +136,7 @@ macro spmd(procs, ex)
     end
 end
 macro spmd(ex)
-    SPMD = @__MODULE__ 
+    SPMD = @__MODULE__
     esc(:($SPMD.@spmd($SPMD.Distributed.workers(), $ex)))
 end
 
