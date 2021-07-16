@@ -1,6 +1,6 @@
 module SPMD
 
-export @spmd, spmd
+export @spmd, spmdcall
 
 using Distributed
 
@@ -58,10 +58,18 @@ function workers_from_rrefs(W::Workers, rrefs, args...)
     workers_from_rrefs(W, args...)
 end
 
+"""
+    spmdcall(fn, args...)
 
-spmd(fn, args...) = spmd(fn, workers_from_objs(args...), args...)
+Call `fn(args...)` on each worker process, returning a `SPMDResult`. Each `arg` in `args`
+will be sent to each process unless it is a _distributed object_ (i.e. it defines a
+`SPMD.remoterefs(arg)` method, in which case it will receive the object underlying the
+remote reference.
 
-function spmd(fn, workers::Workers, args...)   
+"""
+spmdcall(fn, args...) = spmdcall(fn, workers_from_objs(args...), args...)
+
+function spmdcall(fn, workers::Workers, args...)   
     rresult = map(enumerate(workers.pids)) do (i, pid)
         rargs = map(arg -> getrref(arg, i), args)
         remotecall(pid, rargs) do rargs
@@ -81,7 +89,7 @@ returns a [`SPMDResult`](@ref) object. Call `wait` or `fetch` on the `SPMDResult
 synchronize.
 """
 function spmd_eval(m::Module, procs, ex)
-    spmd(Core.eval, Workers(procs), m, ex)
+    spmdcall(Core.eval, Workers(procs), m, ex)
 end
 function Base.wait(res::SPMDResult)
     local c_ex
